@@ -143,7 +143,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: BottomAppBar(
-        color: palette.surface,
+        color: const Color(0xFF1E3A5F), // Health App: barra de navegación azul marino
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         height: 78,
@@ -248,8 +248,8 @@ class _NavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final selected = index == selectedIndex;
     final color = selected
-        ? Theme.of(context).colorScheme.primary
-        : palette.textMuted;
+        ? Colors.white
+        : Colors.white70;
     return Expanded(
       child: Semantics(
         identifier: id,

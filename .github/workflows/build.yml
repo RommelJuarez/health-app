@@ -1,0 +1,114 @@
+# Health App — builds de prueba para Android (APK) e iOS (IPA sin firmar).
+#
+# - APK: firmado con un keystore temporal que se genera en cada corrida.
+#   Si ya tienes una versión instalada, desinstálala antes de instalar otra.
+# - IPA: sale sin firmar. Se firma al instalarlo con SideStore, AltStore o
+#   Sideloadly usando tu Apple ID.
+# - .env: usa valores de prueba (stub), así que la búsqueda de alimentos en
+#   Supabase no funciona. Open Food Facts y el código de barras sí.
+
+name: Build APK + IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: ./.github/actions/setup-flutter-cache
+
+      - name: Generate stub .env
+        uses: ./.github/actions/write-env-file
+        with:
+          sentry_dns: https://stub@sentry.io/0
+          supabase_project_url: https://stub.supabase.co
+          supabase_project_anon_key: ci-stub
+
+      - name: Generate throwaway keystore
+        run: |
+          keytool -genkeypair -v -keystore android/app/ci-keystore.jks \
+            -alias healthapp -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass healthapp -keypass healthapp \
+            -dname "CN=Health App, OU=Dev, O=Health App, C=US"
+          cat > android/key.properties <<EOF
+          storePassword=healthapp
+          keyPassword=healthapp
+          keyAlias=healthapp
+          storeFile=../app/ci-keystore.jks
+          EOF
+
+      - run: flutter pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build APK
+        run: flutter build apk --release --flavor full
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-app-android
+          path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 14
+
+  ios:
+    name: iOS IPA (unsigned)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: ./.github/actions/setup-flutter-cache
+
+      # Sin equipo de desarrollo configurado, SPM no puede firmar sus paquetes.
+      - name: Disable Swift Package Manager
+        run: flutter config --no-enable-swift-package-manager
+
+      - name: Generate stub .env
+        uses: ./.github/actions/write-env-file
+        with:
+          sentry_dns: https://stub@sentry.io/0
+          supabase_project_url: https://stub.supabase.co
+          supabase_project_anon_key: ci-stub
+
+      - run: flutter pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Pod install
+        run: .github/scripts/pod_install_with_targeted_fallback.sh
+
+      - name: Build iOS (no codesign)
+        run: flutter build ios --no-codesign --release --flavor full
+
+      - name: Package IPA
+        run: |
+          APP_PATH=$(find build/ios/iphoneos -maxdepth 1 -name '*.app' | head -n 1)
+          test -n "$APP_PATH" || { echo "No .app found"; ls -la build/ios/iphoneos; exit 1; }
+          mkdir -p ipa/Payload
+          cp -R "$APP_PATH" ipa/Payload/
+          (cd ipa && zip -qry ../health-app-unsigned.ipa Payload)
+          ls -lh health-app-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-app-ios
+          path: health-app-unsigned.ipa
+          retention-days: 14
