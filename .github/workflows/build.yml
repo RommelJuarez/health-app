@@ -6,12 +6,15 @@
 #   Sideloadly usando tu Apple ID.
 # - .env: usa valores de prueba (stub), así que la búsqueda de alimentos en
 #   Supabase no funciona. Open Food Facts y el código de barras sí.
+# - Release: al subir una etiqueta vX.Y.Z (git tag v0.1.0 && git push origin v0.1.0)
+#   se publica un GitHub Release con el APK y el IPA listos para descargar.
 
 name: Build APK + IPA
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
@@ -112,3 +115,36 @@ jobs:
           name: health-app-ios
           path: health-app-unsigned.ipa
           retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Rename files with version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          cp artifacts/health-app-android/*.apk "dist/health-app-${TAG}.apk"
+          cp artifacts/health-app-ios/health-app-unsigned.ipa "dist/health-app-${TAG}-unsigned.ipa"
+          ls -lh dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          Builds de prueba.
+
+          - **Android:** instala el `.apk` (permite apps de origen desconocido). Firmado con una llave temporal: desinstala la versión anterior antes de instalar esta.
+          - **iOS:** el `.ipa` va sin firmar. Instálalo con Sideloadly, AltStore o SideStore usando tu Apple ID (con cuenta gratis caduca a los 7 días).
+          - La búsqueda en la base de alimentos de Supabase no funciona en este build (valores de prueba en `.env`).
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Health App $GITHUB_REF_NAME" --notes-file notes.md
